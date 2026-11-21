@@ -28,11 +28,11 @@ CAM = 128
 MAX_ROWS = 2000  # stages cap at 75 s * 10 Hz; anything longer is not from the game
 JOINTS = ["j1_base", "j2_shoulder", "j3_elbow", "j4_wrist_pitch", "j5_wrist_roll", "gripper"]
 TASKS = {
-    "lift": "Pick up the red cube and lift it at least 15 cm.",
-    "place": "Pick up the red cube and place it inside the green circle.",
-    "precise": "Place the red cube precisely inside the small green circle.",
-    "wall": "Move the red cube over the wall into the green circle.",
-    "stack": "Stack one cube on top of the other.",
+    "lift": "Pick up the red brick and lift it at least 15 cm.",
+    "place": "Pick up the red brick and place it inside the green circle.",
+    "precise": "Place the red brick precisely inside the small green circle.",
+    "wall": "Move the red brick over the barricade into the green circle.",
+    "stack": "Stack the red brick and the blue block on top of each other.",
 }
 POSE = ["x", "y", "z", "qw", "qx", "qy", "qz"]
 FEATURES = {
