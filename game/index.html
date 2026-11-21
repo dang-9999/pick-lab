@@ -371,23 +371,55 @@ applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-const shell = new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.45, metalness: 0.1 });
-const jointMat = new THREE.MeshStandardMaterial({ color: 0xf2b705, roughness: 0.5 });
-const dark = new THREE.MeshStandardMaterial({ color: 0x2c333a, roughness: 0.6 });
+// pastel look: cream shell, bubblegum joints, mint fingers (visual only; physics geometry is the MJCF)
+const shell = new THREE.MeshStandardMaterial({ color: 0xfff4e8, roughness: 0.55 });
+const jointMat = new THREE.MeshStandardMaterial({ color: 0xff9eb5, roughness: 0.45 });
+const palmMat = new THREE.MeshStandardMaterial({ color: 0x6b7686, roughness: 0.6 });
+const mint = new THREE.MeshStandardMaterial({ color: 0x6fd3c1, roughness: 0.45 });
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffe3d3, roughness: 0.6 });
 function mesh(geo, mat, y = 0) { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = true; return m; }
 const link = (len, rad) => mesh(new THREE.CylinderGeometry(rad, rad, len, 24), shell, len / 2);
 const jointBall = r => mesh(new THREE.SphereGeometry(r, 24, 16), jointMat);
-scene.add(mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.1, 32), dark, 0.05));
+scene.add(mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.1, 32), bodyMat, 0.05));
 const j1 = new THREE.Group(); scene.add(j1);
 j1.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, L0 - 0.1, 24), shell, 0.1 + (L0 - 0.1) / 2));
 const j2 = new THREE.Group(); j2.position.y = L0; j1.add(j2); j2.add(jointBall(0.065), link(L1, 0.045));
+const antenna = new THREE.Group(); antenna.position.set(-0.045, 0.045, 0); antenna.rotation.z = 0.7; j2.add(antenna);
+antenna.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 8), palmMat, 0.035));
+antenna.add(mesh(new THREE.SphereGeometry(0.014, 16, 12), new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.4, emissive: 0x553f00 }), 0.075));
 const j3 = new THREE.Group(); j3.position.y = L1; j2.add(j3); j3.add(jointBall(0.055), link(L2, 0.038));
 const j4 = new THREE.Group(); j4.position.y = L2; j3.add(j4); j4.add(jointBall(0.045), link(0.06, 0.03));
 const j5 = new THREE.Group(); j4.add(j5);
-j5.add(mesh(new THREE.BoxGeometry(0.13, 0.02, 0.045), dark, 0.07));
+j5.add(mesh(new THREE.BoxGeometry(0.13, 0.02, 0.045), palmMat, 0.07));
 const fingerGeo = new THREE.BoxGeometry(0.012, 0.06, 0.03);
-const fL = mesh(fingerGeo, dark, 0.115), fR = mesh(fingerGeo, dark, 0.115); j5.add(fL, fR);
+const fL = mesh(fingerGeo, mint, 0.115), fR = mesh(fingerGeo, mint, 0.115); j5.add(fL, fR);
+[fL, fR].forEach(f => { const tip = mesh(new THREE.SphereGeometry(0.0075, 12, 8), mint); tip.position.y = 0.03; tip.scale.set(0.8, 1, 2); f.add(tip); });
 const tcp = new THREE.Group(); tcp.position.y = TCP; j5.add(tcp);
+
+// face on the base: turns toward the player, pupils follow the red cube, blinks now and then
+const face = new THREE.Group(); scene.add(face);
+const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+const ink = new THREE.MeshStandardMaterial({ color: 0x1f2633, roughness: 0.4 });
+const blushMat = new THREE.MeshBasicMaterial({ color: 0xff8fa8, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
+const eyes = [-1, 1].map(s => {
+  const eye = new THREE.Group(); eye.position.set(0.094, 0.06, s * 0.034); face.add(eye);
+  eye.add(new THREE.Mesh(new THREE.SphereGeometry(0.021, 20, 14), white));
+  const pivot = new THREE.Group(); eye.add(pivot);
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.012, 16, 12), ink); pupil.position.z = 0.012; pivot.add(pupil);
+  const shine = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 6), white); shine.position.set(0.004, 0.005, 0.009); pupil.add(shine);
+  const blush = new THREE.Mesh(new THREE.CircleGeometry(0.012, 20), blushMat);
+  blush.position.set(0.108, 0.034, s * 0.06); blush.rotation.y = Math.PI / 2; blush.scale.set(1, 0.6, 1); face.add(blush);
+  return { eye, pivot };
+});
+const smile = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.0028, 8, 20, Math.PI), ink);
+smile.position.set(0.106, 0.036, 0); smile.rotation.set(Math.PI, Math.PI / 2, 0); face.add(smile);
+function updateFace(now) {
+  face.rotation.y = Math.atan2(-camera.position.z, camera.position.x);
+  scene.updateMatrixWorld();
+  const look = cube.getWorldPosition(new THREE.Vector3());
+  const blink = now % 4200 < 130 ? 0.1 : 1;
+  eyes.forEach(({ eye, pivot }) => { pivot.lookAt(look); eye.scale.y = blink; });
+}
 const cubeGeo = new THREE.BoxGeometry(CUBE, CUBE, CUBE);
 const cube = mesh(cubeGeo, new THREE.MeshStandardMaterial({ color: 0xd2452f, roughness: 0.55 }));
 const cube2 = mesh(cubeGeo, new THREE.MeshStandardMaterial({ color: 0x2f7de1, roughness: 0.55 }));
@@ -459,6 +491,7 @@ zone.visible = ghost.visible = liftMark.visible = cube2.visible = wallMesh.visib
 
 function render() {
   const w = stage.clientWidth, h = stage.clientHeight;
+  updateFace(performance.now());
   renderer.setScissorTest(false); renderer.setViewport(0, 0, w, h);
   renderer.render(scene, camera);
   renderer.setScissorTest(true);
