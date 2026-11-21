@@ -1,0 +1,908 @@
+<meta charset="utf-8">
+<title>Pick Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: arcade sim viewport (HUD + overlays) + operator console rail; console drops below on narrow screens */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --card: #f6f8fa; --ink: #141b23; --muted: #5a6876; --line: #d5dce3;
+  --accent: #f2b705; --accent-ink: #8a5d00; --goal: #12a866; --goal-ink: #0b7a49; --bad: #d23f2a; --cap: #f1f4f7;
+  --scene: #cdd6df; --floor: #b8c3cd; --scrim: rgba(238, 241, 244, 0.72);
+  --display: "Black Han Sans", "IBM Plex Sans KR", system-ui, sans-serif;
+  --font: "IBM Plex Sans KR", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141a; --panel: #171e26; --card: #1d2630; --ink: #e8edf2; --muted: #93a2b0; --line: #29333e;
+  --accent: #ffc61a; --accent-ink: #ffc61a; --goal: #2fd388; --goal-ink: #2fd388; --bad: #ff6b55; --cap: #212a34;
+  --scene: #1b232c; --floor: #27313b; --scrim: rgba(15, 20, 26, 0.74); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141a; --panel: #171e26; --card: #1d2630; --ink: #e8edf2; --muted: #93a2b0; --line: #29333e;
+  --accent: #ffc61a; --accent-ink: #ffc61a; --goal: #2fd388; --goal-ink: #2fd388; --bad: #ff6b55; --cap: #212a34;
+  --scene: #1b232c; --floor: #27313b; --scrim: rgba(15, 20, 26, 0.74); color-scheme: dark }
+
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 14px; }
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.app { display: flex; height: 100%; min-height: 0; }
+.stage { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+
+/* HUD */
+.hud { position: absolute; top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); display: grid; gap: 8px; pointer-events: none; max-width: 46%; }
+.banner { background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--accent); border-radius: 8px; padding: 8px 12px; }
+.banner small { display: block; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent-ink); }
+.banner b { display: block; font-family: var(--display); font-weight: 400; font-size: 22px; line-height: 1.15; }
+.banner span { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.45; margin-top: 2px; }
+.meter { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; width: max-content; max-width: 100%; }
+.clock { font-family: var(--mono); font-weight: 700; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.clock small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.stars { display: flex; gap: 2px; font-size: 20px; line-height: 1; }
+.stars i { font-style: normal; color: var(--accent); transition: color .3s, transform .3s; }
+.stars i.off { color: var(--line); transform: scale(0.8); }
+.next { font-size: 11.5px; color: var(--muted); }
+.hold { height: 8px; width: 220px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.hold i { display: block; height: 100%; width: 0; background: var(--goal); }
+.chips { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: 12px; display: flex; gap: 6px; pointer-events: none; }
+.chip { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
+.chip b { color: var(--accent-ink); }
+.chip.held b { color: var(--goal-ink); }
+
+.insets { position: absolute; right: 10px; top: 10px; display: flex; gap: 10px; pointer-events: none; }
+.inset { box-sizing: border-box; border: 2px solid var(--line); border-radius: 8px; position: relative; }
+.inset span { position: absolute; top: 4px; left: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #fff; text-shadow: 0 1px 2px #000; }
+
+.toast { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); background: var(--ink); color: var(--bg); border-radius: 999px; padding: 8px 16px; font-size: 13px; pointer-events: none; }
+
+/* overlays */
+.overlay { position: absolute; inset: 0; display: grid; place-items: center; background: var(--scrim); padding: 16px; overflow-y: auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; text-align: center; display: grid; gap: 10px; max-width: 380px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18); }
+.panel h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 30px; line-height: 1.1; text-wrap: balance; }
+.panel p { margin: 0; color: var(--muted); line-height: 1.55; }
+.panel .big { font-family: var(--mono); font-weight: 700; font-size: 30px; font-variant-numeric: tabular-nums; }
+.btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+.btn { border: 1px solid var(--line); background: var(--cap); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-weight: 500; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #1b1300; font-weight: 700; }
+.btn kbd { margin-left: 6px; }
+.win h2 { color: var(--goal-ink); font-size: 44px; }
+.lose h2 { color: var(--bad); font-size: 44px; }
+.bigstars { display: flex; justify-content: center; gap: 6px; font-size: 46px; line-height: 1; }
+.bigstars i { font-style: normal; color: var(--line); }
+.bigstars i.on { color: var(--accent); animation: pop .45s cubic-bezier(.3, 1.6, .5, 1) both; }
+.bigstars i.on:nth-child(2) { animation-delay: .18s; } .bigstars i.on:nth-child(3) { animation-delay: .36s; }
+@keyframes pop { from { transform: scale(0) rotate(-40deg); } to { transform: scale(1) rotate(0); } }
+.new { display: inline-block; background: var(--goal); color: #04140c; font-weight: 700; font-size: 11px; letter-spacing: .08em; border-radius: 4px; padding: 2px 6px; }
+
+.menu { max-width: 760px; width: 100%; display: grid; gap: 18px; }
+.menu header { text-align: center; }
+.menu h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(40px, 7vw, 64px); line-height: 1; letter-spacing: 0.01em; }
+.menu h1 span { color: var(--accent-ink); }
+.menu header p { margin: 8px 0 0; color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
+.card { text-align: left; background: var(--panel); border: 2px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; display: grid; gap: 4px; align-content: start; min-width: 0; transition: transform .12s, border-color .12s; }
+.card:hover:not(:disabled) { transform: translateY(-3px); border-color: var(--accent); }
+.card:disabled { cursor: not-allowed; opacity: 0.5; }
+.card .no { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--accent-ink); }
+.card b { font-family: var(--display); font-weight: 400; font-size: 20px; line-height: 1.15; }
+.card p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.card .st { font-size: 16px; color: var(--accent); letter-spacing: 1px; }
+.card .st .off { color: var(--line); }
+.hint { text-align: center; color: var(--muted); font-size: 12px; }
+
+.confetti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.confetti i { position: absolute; top: -12px; width: 8px; height: 12px; border-radius: 2px; animation: fall 1.8s ease-in forwards; }
+@keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity: 0.2; } }
+.shake { animation: shake .4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+@media (prefers-reduced-motion: reduce) { .shake, .bigstars i.on, .confetti i { animation: none; } .card { transition: none; } }
+
+/* console */
+.console { width: 300px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 18px; padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 20px; }
+.console h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 26px; }
+.console h1 span { color: var(--accent-ink); }
+.sub { margin: 4px 0 0; color: var(--muted); line-height: 1.5; font-size: 13px; }
+.label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 8px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #1b1300; font-weight: 700; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+kbd { font-family: var(--mono); font-size: 12px; background: var(--cap); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.keys span { color: var(--muted); }
+.board { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+.board li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.board li.me { color: var(--accent-ink); font-weight: 700; }
+.board .n { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.board .t { font-family: var(--mono); }
+.board .s { color: var(--accent); font-size: 12px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.stat b { display: block; font-family: var(--mono); font-size: 18px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 11px; color: var(--muted); }
+.note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.legal { margin-top: auto; font-size: 10px; color: var(--muted); line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .app { flex-direction: column; height: auto; }
+  .stage { height: 72vh; flex: none; }
+  .hud { max-width: 60%; }
+  .console { width: auto; border-left: 0; border-top: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+</style>
+
+<div class="app">
+  <div class="stage" id="stage" aria-label="로봇 시뮬레이션 화면. 키보드로 조작합니다.">
+    <div class="hud" id="hud" hidden>
+      <div class="banner"><small id="hudNo">STAGE 1</small><b id="hudName">첫 집기</b><span id="hudGoal"></span></div>
+      <div class="meter">
+        <div class="clock"><span id="hudTime">0.0</span><small> / <span id="hudLimit">60</span>s</small></div>
+        <div class="stars" id="hudStars" aria-label="현재 받을 수 있는 별"><i>★</i><i>★</i><i>★</i></div>
+        <div class="next" id="hudNext"></div>
+      </div>
+      <div class="hold" title="목표 상태를 1초 유지"><i id="holdFill"></i></div>
+    </div>
+    <div class="chips" id="chips" hidden>
+      <div class="chip">모드 <b id="hudMode">그리퍼</b></div>
+      <div class="chip" id="chipGrip">집게 <b id="hudGrip">열림</b></div>
+    </div>
+    <div class="insets" aria-hidden="true">
+      <div class="inset" id="insetTop"><span>위</span></div>
+      <div class="inset" id="insetWrist"><span>손목</span></div>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+    <div class="confetti" id="confetti"></div>
+
+    <div class="overlay" id="ovLoading">
+      <div class="panel"><h2>엔진 시동 중</h2><p>MuJoCo 물리 엔진(약 11MB)을 내려받고 있습니다. 처음 한 번만 시간이 걸립니다.</p></div>
+    </div>
+
+    <div class="overlay" id="ovMenu" hidden>
+      <div class="menu">
+        <header><h1>Pick <span>Lab</span></h1><p>로봇팔을 조종해 다섯 스테이지를 깨 보세요. 빠를수록 별이 많습니다.</p></header>
+        <div class="cards" id="cards"></div>
+        <p class="hint">스테이지를 깨면 다음 스테이지가 열립니다 · 모든 플레이는 로봇 학습 데이터로 저장됩니다</p>
+      </div>
+    </div>
+
+    <div class="overlay" id="ovReady" hidden>
+      <div class="panel">
+        <small class="no" id="rdNo" style="font-family:var(--mono);font-weight:700;letter-spacing:.12em;color:var(--accent-ink)">STAGE 1</small>
+        <h2 id="rdName">첫 집기</h2>
+        <p id="rdGoal"></p>
+        <p id="rdStars"></p>
+        <p><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 등 조작 키를 누르면 시작합니다</p>
+        <div class="btns"><button class="btn" data-act="menu">스테이지 선택 <kbd>Esc</kbd></button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="ovResult" hidden>
+      <div class="panel" id="rsPanel">
+        <h2 id="rsTitle">CLEAR!</h2>
+        <div class="bigstars" id="rsStars"><i>★</i><i>★</i><i>★</i></div>
+        <div class="big" id="rsTime">0.0s</div>
+        <p id="rsText"></p>
+        <div class="btns">
+          <button class="btn" data-act="retry">다시 <kbd>N</kbd></button>
+          <button class="btn primary" data-act="next" id="rsNext">다음 스테이지 <kbd>Enter</kbd></button>
+          <button class="btn" data-act="menu">메뉴 <kbd>Esc</kbd></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="console">
+    <div>
+      <h1>Pick <span>Lab</span></h1>
+      <p class="sub">키보드로 로봇팔을 조종하는 물리 게임입니다. 모든 플레이는 손목 카메라 영상과 함께 로봇 학습용 시연 데이터로 저장됩니다.</p>
+    </div>
+    <section>
+      <p class="label">조작 모드 <kbd>M</kbd></p>
+      <div class="seg" role="group" aria-label="조작 모드">
+        <button id="btnEE" aria-pressed="true">그리퍼 위치</button>
+        <button id="btnJoint" aria-pressed="false">관절 직접</button>
+      </div>
+    </section>
+    <section>
+      <p class="label">키 배치</p>
+      <div class="keys" id="keymap"></div>
+    </section>
+    <section>
+      <p class="label" id="boardTitle">최단 기록</p>
+      <ol class="board" id="board"></ol>
+      <p class="note" id="boardEmpty">아직 이 스테이지의 성공 기록이 없습니다.</p>
+    </section>
+    <section>
+      <p class="label">전체 기록</p>
+      <div class="stats">
+        <div class="stat"><b id="stTotal">0</b><span>플레이</span></div>
+        <div class="stat"><b id="stRate">–</b><span>성공률</span></div>
+        <div class="stat"><b id="stMine">0</b><span>내 플레이</span></div>
+      </div>
+    </section>
+    <section class="row">
+      <button class="btn" id="btnSound" aria-pressed="true">소리 켜짐</button>
+      <button class="btn" id="btnExport" hidden>에피소드 저장 (JSONL)</button>
+    </section>
+    <p class="note" id="saveStatus">기록 저장 연결 중…</p>
+    <p class="legal">CONFIDENTIAL AND PROPRIETARY © <span id="yr"></span> Nota Inc.<br>Unauthorized use, copying, or disclosure is prohibited.</p>
+  </aside>
+</div>
+
+<script type="text/xml" id="mjcf"><mujoco model="pick-lab">
+  <compiler angle="radian"/>
+  <option timestep="0.002" integrator="implicitfast"/>
+  <default>
+    <geom friction="1 0.02 0.001"/>
+    <joint damping="2" armature="0.05"/>
+    <default class="arm"><geom contype="0" conaffinity="1" density="300"/></default>
+    <default class="finger"><geom contype="0" conaffinity="1" condim="4" friction="1.5 0.02 0.001" density="300"/></default>
+    <default class="servo"><position kp="800" dampratio="1"/></default>
+    <default class="grip"><position kp="300" dampratio="1" ctrlrange="0 0.04" forcerange="-12 12"/></default>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1" contype="1" conaffinity="1"/>
+    <geom name="wall" type="box" size="0.16 0.01 0.06" pos="0 3 0.06" contype="1" conaffinity="1"/>
+    <geom class="arm" type="cylinder" size="0.1 0.05" pos="0 0 0.05"/>
+    <body name="link1" gravcomp="1">
+      <joint name="j1" axis="0 0 1" range="-3.1416 3.1416"/>
+      <geom class="arm" type="cylinder" size="0.06 0.115" pos="0 0 0.215"/>
+      <body name="link2" pos="0 0 0.33" gravcomp="1">
+        <joint name="j2" axis="0 1 0" range="-1.7 1.7"/>
+        <geom class="arm" type="capsule" size="0.045" fromto="0 0 0 0 0 0.32"/>
+        <body name="link3" pos="0 0 0.32" gravcomp="1">
+          <joint name="j3" axis="0 1 0" range="-2.6 2.6"/>
+          <geom class="arm" type="capsule" size="0.038" fromto="0 0 0 0 0 0.3"/>
+          <body name="link4" pos="0 0 0.3" gravcomp="1">
+            <joint name="j4" axis="0 1 0" range="-3.3 3.3"/>
+            <geom class="arm" type="cylinder" size="0.03 0.03" pos="0 0 0.03"/>
+            <body name="hand" gravcomp="1">
+              <joint name="j5" axis="0 0 1" range="-3.1416 3.1416"/>
+              <geom class="arm" type="box" size="0.065 0.0225 0.01" pos="0 0 0.07"/>
+              <site name="tcp" pos="0 0 0.12"/>
+              <body name="fingerL" pos="-0.011 0 0" gravcomp="1">
+                <joint name="gl" type="slide" axis="-1 0 0" range="0 0.04" damping="5" armature="0.01"/>
+                <geom class="finger" type="box" size="0.006 0.015 0.03" pos="0 0 0.115"/>
+                <site name="tipL" pos="0 0 0.145"/>
+              </body>
+              <body name="fingerR" pos="0.011 0 0" gravcomp="1">
+                <joint name="gr" type="slide" axis="1 0 0" range="0 0.04" damping="5" armature="0.01"/>
+                <geom class="finger" type="box" size="0.006 0.015 0.03" pos="0 0 0.115"/>
+                <site name="tipR" pos="0 0 0.145"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="cube" pos="0.4 0 0.025">
+      <freejoint name="cube"/>
+      <geom name="cube" type="box" size="0.025 0.025 0.025" mass="0.05" condim="4" contype="1" conaffinity="1"/>
+    </body>
+    <body name="cube2" pos="1.2 -1.5 0.025">
+      <freejoint name="cube2"/>
+      <geom name="cube2" type="box" size="0.025 0.025 0.025" mass="0.05" condim="4" contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <position class="servo" joint="j1" ctrlrange="-3.1416 3.1416"/>
+    <position class="servo" joint="j2" ctrlrange="-1.7 1.7"/>
+    <position class="servo" joint="j3" ctrlrange="-2.6 2.6"/>
+    <position class="servo" joint="j4" ctrlrange="-3.3 3.3"/>
+    <position class="servo" joint="j5" ctrlrange="-3.1416 3.1416"/>
+    <position class="grip" joint="gl"/>
+    <position class="grip" joint="gr"/>
+  </actuator>
+</mujoco></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module">
+import loadMujoco from 'https://cdn.jsdelivr.net/npm/@mujoco/mujoco@4.0.1/mujoco.js';
+const $ = id => document.getElementById(id);
+$('yr').textContent = new Date().getFullYear();
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const rnd = (a, b) => a + Math.random() * (b - a);
+const polar = (r, a) => [r * Math.cos(a), r * Math.sin(a)];
+
+// ---------- stages (positions in the MuJoCo frame: Z up, meters) ----------
+const STAGES = [
+  { id: 'lift', name: '첫 집기', goal: '큐브를 집어 15cm 위로 들어 올리고 1초 버티세요.', limit: 60, stars: [12, 25] },
+  { id: 'place', name: '배달', goal: '큐브를 초록 원 안에 내려놓으세요.', limit: 60, stars: [15, 30], tol: 0.05 },
+  { id: 'precise', name: '정밀 배달', goal: '작은 원 안에 정확히 내려놓으세요. 오차 1.5cm까지 허용됩니다.', limit: 60, stars: [20, 40], tol: 0.015 },
+  { id: 'wall', name: '담 넘기', goal: '벽 너머의 초록 원으로 큐브를 옮기세요.', limit: 75, stars: [25, 45], tol: 0.05, wall: true },
+  { id: 'stack', name: '탑 쌓기', goal: '큐브 하나를 다른 큐브 위에 올려 1초 버티세요.', limit: 75, stars: [25, 45], cubes: 2 },
+];
+function layout(s) {
+  const side = Math.random() < 0.5 ? 1 : -1, L = {};
+  if (s.cubes === 2) {
+    L.cube = [...polar(rnd(0.3, 0.46), side * rnd(0.15, 0.8)), rnd(0, Math.PI)];
+    L.cube2 = [...polar(rnd(0.3, 0.46), -side * rnd(0.15, 0.8)), rnd(0, Math.PI)];
+  } else if (s.tol) {
+    L.cube = [...polar(rnd(0.32, 0.46), -side * (s.wall ? rnd(0.6, 0.85) : rnd(0.1, 0.8))), rnd(0, Math.PI)];
+    L.zone = polar(rnd(0.3, 0.48), side * (s.wall ? rnd(0.6, 0.85) : rnd(0.3, 1.0)));
+  } else {
+    L.cube = [...polar(rnd(0.3, 0.48), rnd(-1, 1)), rnd(0, Math.PI)];
+  }
+  if (s.wall) { const m = [(L.cube[0] + L.zone[0]) / 2, (L.cube[1] + L.zone[1]) / 2]; L.wall = [...m, Math.atan2(m[1], m[0])]; }
+  return L;
+}
+const starsFor = (s, t) => t <= s.stars[0] ? 3 : t <= s.stars[1] ? 2 : 1;
+
+// ---------- robot geometry + IK (three.js frame, Y up) ----------
+const L0 = 0.33, L1 = 0.32, L2 = 0.30, TCP = 0.12, CUBE = 0.05, GMIN = 0.01;
+const HOLD_T = 1.0, HZ = 10;
+const LIM = [[-Math.PI, Math.PI], [-1.7, 1.7], [-2.6, 2.6], [-3.3, 3.3], [-Math.PI, Math.PI]];
+function ik(p, roll) {
+  const r = Math.hypot(p.x, p.z), dy = p.y + TCP - L0, d = Math.hypot(r, dy);
+  if (d > L1 + L2 - 0.005 || r < 0.12) return null;
+  const q3 = Math.acos(clamp((d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2), -1, 1));
+  const q2 = Math.atan2(r, dy) - Math.atan2(L2 * Math.sin(q3), L1 + L2 * Math.cos(q3));
+  const q = [Math.atan2(-p.z, p.x), q2, q3, Math.PI - q2 - q3, roll];
+  return q.every((v, i) => v >= LIM[i][0] && v <= LIM[i][1]) ? q : null;
+}
+
+// ---------- scene ----------
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 20);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+sun.position.set(0.6, 1.6, 0.8); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -1, right: 1, top: 1, bottom: -1 });
+scene.add(sun);
+const floorMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), floorMat);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const grid = new THREE.GridHelper(2, 20, 0x7f8b96, 0x7f8b96);
+grid.material.transparent = true; grid.material.opacity = 0.35; grid.position.y = 0.001; scene.add(grid);
+const reach = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.6, 64, 1, -Math.PI / 2.4, Math.PI / 1.2),
+  new THREE.MeshBasicMaterial({ color: 0xf2b705, transparent: true, opacity: 0.1, side: THREE.DoubleSide }));
+reach.rotation.x = -Math.PI / 2; reach.position.y = 0.002; scene.add(reach);
+function applyTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  scene.background = new THREE.Color(cs.getPropertyValue('--scene').trim());
+  floorMat.color.set(cs.getPropertyValue('--floor').trim());
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+const shell = new THREE.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.45, metalness: 0.1 });
+const jointMat = new THREE.MeshStandardMaterial({ color: 0xf2b705, roughness: 0.5 });
+const dark = new THREE.MeshStandardMaterial({ color: 0x2c333a, roughness: 0.6 });
+function mesh(geo, mat, y = 0) { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = true; return m; }
+const link = (len, rad) => mesh(new THREE.CylinderGeometry(rad, rad, len, 24), shell, len / 2);
+const jointBall = r => mesh(new THREE.SphereGeometry(r, 24, 16), jointMat);
+scene.add(mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.1, 32), dark, 0.05));
+const j1 = new THREE.Group(); scene.add(j1);
+j1.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, L0 - 0.1, 24), shell, 0.1 + (L0 - 0.1) / 2));
+const j2 = new THREE.Group(); j2.position.y = L0; j1.add(j2); j2.add(jointBall(0.065), link(L1, 0.045));
+const j3 = new THREE.Group(); j3.position.y = L1; j2.add(j3); j3.add(jointBall(0.055), link(L2, 0.038));
+const j4 = new THREE.Group(); j4.position.y = L2; j3.add(j4); j4.add(jointBall(0.045), link(0.06, 0.03));
+const j5 = new THREE.Group(); j4.add(j5);
+j5.add(mesh(new THREE.BoxGeometry(0.13, 0.02, 0.045), dark, 0.07));
+const fingerGeo = new THREE.BoxGeometry(0.012, 0.06, 0.03);
+const fL = mesh(fingerGeo, dark, 0.115), fR = mesh(fingerGeo, dark, 0.115); j5.add(fL, fR);
+const tcp = new THREE.Group(); tcp.position.y = TCP; j5.add(tcp);
+const cubeGeo = new THREE.BoxGeometry(CUBE, CUBE, CUBE);
+const cube = mesh(cubeGeo, new THREE.MeshStandardMaterial({ color: 0xd2452f, roughness: 0.55 }));
+const cube2 = mesh(cubeGeo, new THREE.MeshStandardMaterial({ color: 0x2f7de1, roughness: 0.55 }));
+const wallMesh = mesh(new THREE.BoxGeometry(0.32, 0.12, 0.02), new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 }));
+scene.add(cube, cube2, wallMesh);
+
+// goal markers
+const goalColor = new THREE.Color(0x12a866);
+const zone = new THREE.Group(); scene.add(zone);
+const zoneDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ color: goalColor, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
+const zoneRing = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 48), new THREE.MeshBasicMaterial({ color: goalColor, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+zoneDisc.rotation.x = zoneRing.rotation.x = -Math.PI / 2; zone.add(zoneDisc, zoneRing); zone.position.y = 0.003;
+const ghost = new THREE.LineSegments(new THREE.EdgesGeometry(cubeGeo), new THREE.LineBasicMaterial({ color: goalColor }));
+scene.add(ghost);
+const liftMark = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.056, 48), new THREE.MeshBasicMaterial({ color: goalColor, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+liftMark.rotation.x = -Math.PI / 2; scene.add(liftMark);
+
+function setQ(q) {
+  j1.rotation.y = q[0]; j2.rotation.z = -q[1]; j3.rotation.z = -q[2]; j4.rotation.z = -q[3]; j5.rotation.y = q[4];
+  scene.updateMatrixWorld();
+}
+function setGap(gap) { fL.position.x = -(gap / 2 + 0.006); fR.position.x = gap / 2 + 0.006; }
+const wpos = (o, local = new THREE.Vector3()) => o.localToWorld(local.clone());
+
+// ---------- camera: over-the-shoulder (W = away from you) and side view ----------
+const VIEWS = [{ yaw: -0.45, pitch: 0.85 }, { yaw: -2.25, pitch: 0.5 }];
+let view = 0;
+const orbit = { ...VIEWS[0], dist: 1.7, target: new THREE.Vector3(0.3, 0.12, 0) };
+function placeCamera() {
+  const { yaw, pitch, dist, target } = orbit;
+  camera.position.set(target.x - dist * Math.cos(pitch) * Math.cos(yaw), target.y + dist * Math.sin(pitch), target.z - dist * Math.cos(pitch) * Math.sin(yaw));
+  camera.lookAt(target);
+}
+function nextView() { view = (view + 1) % VIEWS.length; Object.assign(orbit, VIEWS[view]); placeCamera(); }
+let drag = null;
+renderer.domElement.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; renderer.domElement.setPointerCapture(e.pointerId); });
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!drag) return;
+  orbit.yaw += (e.clientX - drag.x) * 0.006;
+  orbit.pitch = clamp(orbit.pitch + (e.clientY - drag.y) * 0.004, 0.1, 1.45);
+  drag = { x: e.clientX, y: e.clientY }; placeCamera();
+});
+renderer.domElement.addEventListener('pointerup', () => drag = null);
+renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = clamp(orbit.dist * (1 + e.deltaY * 0.001), 0.6, 3); placeCamera(); }, { passive: false });
+const camForward = () => new THREE.Vector3().subVectors(orbit.target, camera.position).setY(0).normalize();
+
+// inset views, rolled so W always points up on screen; wristCam is the physical camera that gets recorded
+const topCam = new THREE.PerspectiveCamera(40, 1, 0.05, 5);
+topCam.position.set(0.3, 1.5, 0);
+const wristCam = new THREE.PerspectiveCamera(75, 1, 0.005, 3);
+wristCam.position.set(0, 0.08, 0.03); wristCam.rotation.x = Math.PI / 2; j5.add(wristCam);
+const wristView = new THREE.PerspectiveCamera(75, 1, 0.005, 3);
+const INSETS = [[topCam, 'insetTop'], [wristView, 'insetWrist']];
+let insetSize = 0;
+function alignInsets() {
+  const fwd = camForward(), p = new THREE.Vector3(), d = new THREE.Vector3();
+  topCam.up.copy(fwd); topCam.lookAt(0.3, 0, 0);
+  wristCam.getWorldPosition(p); wristCam.getWorldDirection(d);
+  wristView.position.copy(p);
+  wristView.up.copy(Math.abs(d.y) > 0.9 ? fwd : new THREE.Vector3(0, 1, 0));
+  wristView.lookAt(p.add(d));
+}
+const dropLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xf2b705 }));
+const dropDot = new THREE.Mesh(new THREE.RingGeometry(0.008, 0.014, 24), new THREE.MeshBasicMaterial({ color: 0xf2b705, side: THREE.DoubleSide }));
+dropDot.rotation.x = -Math.PI / 2;
+scene.add(dropLine, dropDot);
+const OVERLAY_ONLY = [dropLine, dropDot, zone, ghost, liftMark, reach];
+zone.visible = ghost.visible = liftMark.visible = cube2.visible = wallMesh.visible = false;
+
+function render() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, w, h);
+  renderer.render(scene, camera);
+  renderer.setScissorTest(true);
+  alignInsets();
+  INSETS.forEach(([cam], i) => {
+    const n = INSETS.length, x = w - 10 - insetSize * (n - i) - 10 * (n - 1 - i), y = h - 10 - insetSize; // mirrors .insets (GL origin bottom-left)
+    renderer.setViewport(x, y, insetSize, insetSize); renderer.setScissor(x, y, insetSize, insetSize);
+    renderer.render(scene, cam);
+  });
+}
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  insetSize = Math.round(clamp(Math.min(w, h) * 0.26, 84, 200));
+  INSETS.forEach(([, id]) => { $(id).style.width = $(id).style.height = `${insetSize}px`; });
+  orbit.dist = clamp(1.7 / Math.min(1, camera.aspect) ** 0.8, 0.6, 3); placeCamera();
+}
+new ResizeObserver(resize).observe(stage);
+
+// ---------- wrist-camera video: one 128x128 frame per recorded row (frame i <-> row i) ----------
+const CAM = 128, camRT = new THREE.WebGLRenderTarget(CAM, CAM), camPx = new Uint8Array(CAM * CAM * 4);
+const camCanvas = document.createElement('canvas'); camCanvas.width = camCanvas.height = CAM;
+const camCtx = camCanvas.getContext('2d'), camImg = camCtx.createImageData(CAM, CAM);
+let recorder = null, camTrack = null, chunks = [];
+function startVideo() {
+  try {
+    if (!window.MediaRecorder || !camCanvas.captureStream) return;
+    const type = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(t => MediaRecorder.isTypeSupported(t));
+    if (!type) return;
+    const stream = camCanvas.captureStream(0);
+    camTrack = stream.getVideoTracks()[0]; chunks = [];
+    recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 400000 });
+    recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    recorder.start();
+  } catch (e) { console.warn('video recording unavailable', e); recorder = null; }
+}
+function grabFrame() {
+  if (!recorder) return;
+  OVERLAY_ONLY.forEach(o => { o.userData.v = o.visible; o.visible = false; });
+  renderer.setScissorTest(false);
+  renderer.setRenderTarget(camRT); renderer.render(scene, wristCam);
+  renderer.readRenderTargetPixels(camRT, 0, 0, CAM, CAM, camPx); renderer.setRenderTarget(null);
+  OVERLAY_ONLY.forEach(o => o.visible = o.userData.v);
+  for (let y = 0; y < CAM; y++) camImg.data.set(camPx.subarray((CAM - 1 - y) * CAM * 4, (CAM - y) * CAM * 4), y * CAM * 4); // GL rows are bottom-up
+  camCtx.putImageData(camImg, 0, 0);
+  camTrack.requestFrame();
+}
+function stopVideo() {
+  const r = recorder, c = chunks; recorder = null;
+  if (!r) return Promise.resolve(null);
+  const done = new Promise(res => { r.onstop = () => res(new Blob(c, { type: r.mimeType.split(';')[0] })); r.stop(); camTrack.stop(); });
+  return Promise.race([done, new Promise(res => setTimeout(() => res(null), 4000))]);
+}
+
+// ---------- sound ----------
+let actx = null, soundOn = true;
+function beep(freq, dur = 0.08, type = 'square', vol = 0.05, when = 0) {
+  if (!soundOn) return;
+  try {
+    actx = actx || new AudioContext();
+    const o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime + when;
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(actx.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  } catch { /* audio unavailable */ }
+}
+const SFX = {
+  grab: () => beep(880, 0.07), drop: () => beep(440, 0.07), go: () => { beep(660, 0.08); beep(990, 0.12, 'square', 0.05, 0.09); },
+  win: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.16, 'square', 0.05, i * 0.09)),
+  fail: () => { beep(196, 0.25, 'sawtooth', 0.05); beep(130, 0.4, 'sawtooth', 0.05, 0.15); },
+  star: i => beep(1047 + i * 250, 0.12, 'triangle', 0.07, 0.25 + i * 0.18), lose: () => beep(330, 0.1, 'triangle', 0.05),
+};
+$('btnSound').onclick = () => { soundOn = !soundOn; $('btnSound').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐'; $('btnSound').setAttribute('aria-pressed', soundOn); };
+
+// ---------- MuJoCo bridge (MuJoCo is Z-up; three.js view is Y-up) ----------
+let mj, model, data, ids;
+const toThree = (a, i) => new THREE.Vector3(a[i], a[i + 2], -a[i + 1]);
+const C = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), Ci = C.clone().invert();
+async function loadPhysics() {
+  const res = await fetch('mujoco.wasm');
+  if (!res.ok) throw new Error(`mujoco.wasm ${res.status}`);
+  mj = await loadMujoco({ wasmBinary: await res.arrayBuffer() });
+  model = mj.MjModel.from_xml_string($('mjcf').textContent);
+  data = new mj.MjData(model);
+  const id = (type, name) => mj.mj_name2id(model, mj.mjtObj[type].value, name);
+  ids = { tcp: id('mjOBJ_SITE', 'tcp'), tipL: id('mjOBJ_SITE', 'tipL'), tipR: id('mjOBJ_SITE', 'tipR'), wall: id('mjOBJ_GEOM', 'wall'),
+    cube: id('mjOBJ_BODY', 'cube'), cube2: id('mjOBJ_BODY', 'cube2'),
+    cubeQ: model.jnt_qposadr[id('mjOBJ_JOINT', 'cube')], cube2Q: model.jnt_qposadr[id('mjOBJ_JOINT', 'cube2')] };
+}
+const site = i => [data.site_xpos[3 * i], data.site_xpos[3 * i + 1], data.site_xpos[3 * i + 2]];
+const bpos = b => [data.xpos[3 * b], data.xpos[3 * b + 1], data.xpos[3 * b + 2]];
+const opening = () => data.qpos[5] + data.qpos[6];
+function poseMesh(m, b) {
+  m.position.copy(toThree(data.xpos, 3 * b));
+  const xq = data.xquat, i = 4 * b;
+  m.quaternion.copy(C).multiply(new THREE.Quaternion(xq[i + 1], xq[i + 2], xq[i + 3], xq[i])).multiply(Ci);
+}
+function syncView() {
+  setQ([...data.qpos.subarray(0, 5)]); setGap(GMIN + opening());
+  poseMesh(cube, ids.cube); poseMesh(cube2, ids.cube2);
+  const p = wpos(tcp), a = dropLine.geometry.attributes.position;
+  a.setXYZ(0, p.x, p.y, p.z); a.setXYZ(1, p.x, 0.002, p.z); a.needsUpdate = true;
+  dropDot.position.set(p.x, 0.003, p.z);
+  if (stg && stg.cubes === 2) { const top = cube2.position.clone(); ghost.position.set(top.x, top.y + CUBE, top.z); ghost.quaternion.copy(cube2.quaternion); }
+  if (stg && stg.id === 'lift') liftMark.position.set(cube.position.x, 0.15, cube.position.z);
+}
+
+// ---------- controls ----------
+const KEYMAP = {
+  ee: [['W / S', '화면 안쪽 / 바깥쪽'], ['A / D', '화면 왼쪽 / 오른쪽'], ['E / Q', '위 / 아래'], ['Z / C', '집게 회전'], ['Space', '집게 열기 / 닫기'], ['Shift', '정밀 조작'], ['V', '시점 전환'], ['N', '다시 하기'], ['Esc', '스테이지 선택']],
+  joint: [['Q / A', '관절 1 · 몸통'], ['W / S', '관절 2 · 어깨'], ['E / D', '관절 3 · 팔꿈치'], ['R / F', '관절 4 · 손목 굽힘'], ['T / G', '관절 5 · 손목 회전'], ['Space', '집게 열기 / 닫기'], ['Shift', '정밀 조작'], ['V', '시점 전환'], ['N', '다시 하기'], ['Esc', '스테이지 선택']],
+};
+const JOINT_KEYS = [['KeyQ', 'KeyA'], ['KeyW', 'KeyS'], ['KeyE', 'KeyD'], ['KeyR', 'KeyF'], ['KeyT', 'KeyG']];
+const CONTROL = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyZ', 'KeyC', 'KeyR', 'KeyF', 'KeyT', 'KeyG', 'Space']);
+const keys = new Set();
+const k = c => keys.has(c) ? 1 : 0;
+let mode = 'ee';
+function renderMode() {
+  $('btnEE').setAttribute('aria-pressed', mode === 'ee'); $('btnJoint').setAttribute('aria-pressed', mode === 'joint');
+  $('hudMode').textContent = mode === 'ee' ? '그리퍼' : '관절';
+  $('keymap').innerHTML = KEYMAP[mode].map(([a, b]) => `<kbd>${a}</kbd><span>${b}</span>`).join('');
+}
+function setMode(m) {
+  if (m === mode) return;
+  if (m === 'ee') {
+    const p = wpos(tcp), q = ik(p, data.qpos[4]);
+    if (!q) { toast('그리퍼가 닿을 수 있는 위치에서 전환해 주세요'); return; }
+    target = p; roll = data.qpos[4]; Q = q;
+  }
+  mode = m; renderMode();
+  if (ep) ep.modes.add(m);
+}
+$('btnEE').onclick = () => setMode('ee');
+$('btnJoint').onclick = () => setMode('joint');
+let toastTimer;
+function toast(msg) { $('toast').textContent = msg; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 1600); }
+
+addEventListener('keydown', e => {
+  if (!data) return;
+  if (e.target.closest && e.target.closest('button') && (e.code === 'Space' || e.code === 'Enter')) return;
+  if (CONTROL.has(e.code) || e.code.startsWith('Shift')) e.preventDefault();
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === 'Escape') return openMenu();
+  if (state === 'menu') return;
+  if (e.code === 'KeyM') setMode(mode === 'ee' ? 'joint' : 'ee');
+  if (e.code === 'KeyV') nextView();
+  if (e.code === 'KeyN') return loadStage(stageIdx, true);
+  if (e.code === 'Enter' && state === 'done') return lastWin && stageIdx < STAGES.length - 1 ? loadStage(stageIdx + 1) : loadStage(stageIdx);
+  if (e.code === 'Space' && state !== 'done') gripTarget = gripTarget ? 0 : 1;
+  if (state === 'ready' && CONTROL.has(e.code)) start();
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+  const a = b.dataset.act;
+  if (a === 'menu') openMenu(); else if (a === 'retry') loadStage(stageIdx); else if (a === 'next') loadStage(stageIdx + 1);
+});
+
+// ---------- progress (per viewer, a convenience only) ----------
+let progress = {};
+try { progress = JSON.parse(localStorage.getItem('pick-lab-progress') || '{}'); } catch { progress = {}; }
+function saveProgress() { try { localStorage.setItem('pick-lab-progress', JSON.stringify(progress)); } catch { /* storage blocked */ } }
+const unlocked = i => i === 0 || (progress[STAGES[i - 1].id] || 0) > 0;
+
+// ---------- game state ----------
+let Q, target, roll, gripTarget = 1, held = false, holdT = 0, t = 0, state = 'loading', ep = null, recAcc = 0;
+let stageIdx = 0, stg = null, lay = null, lastWin = false, shownStars = 3;
+const BASE_FIELDS = ['t', 'q1', 'q2', 'q3', 'q4', 'q5', 'grip', 'tcp_x', 'tcp_y', 'tcp_z', 'cube_x', 'cube_y', 'cube_z', 'cube_qw', 'cube_qx', 'cube_qy', 'cube_qz', 'held', 'mode',
+  'ctrl1', 'ctrl2', 'ctrl3', 'ctrl4', 'ctrl5', 'ctrl_grip', 'key0', 'key1', 'key2', 'key3', 'key4', 'key5'];
+const CUBE2_FIELDS = ['cube2_x', 'cube2_y', 'cube2_z', 'cube2_qw', 'cube2_qx', 'cube2_qy', 'cube2_qz'];
+let fields = BASE_FIELDS, act = [0, 0, 0, 0, 0, 0];
+
+function show(id) { ['ovLoading', 'ovMenu', 'ovReady', 'ovResult'].forEach(o => $(o).hidden = o !== id); }
+function openMenu() {
+  if (state === 'run' && ep && ep.cols.t.length > 10) finish(false, 'reset');
+  state = 'menu';
+  $('cards').innerHTML = '';
+  STAGES.forEach((s, i) => {
+    const b = document.createElement('button'), got = progress[s.id] || 0;
+    b.className = 'card'; b.disabled = !unlocked(i);
+    b.innerHTML = `<span class="no">STAGE ${i + 1}</span><b></b><p></p><span class="st">${[0, 1, 2].map(n => `<span class="${n < got ? '' : 'off'}">★</span>`).join('')}</span>`;
+    b.querySelector('b').textContent = b.disabled ? '잠김' : s.name;
+    b.querySelector('p').textContent = b.disabled ? '이전 스테이지를 깨면 열립니다' : s.goal;
+    b.onclick = () => loadStage(i);
+    $('cards').append(b);
+  });
+  $('hud').hidden = $('chips').hidden = true;
+  show('ovMenu');
+}
+
+function loadStage(i, manual) {
+  if (i >= STAGES.length) return openMenu();
+  if (manual && state === 'run' && ep && ep.cols.t.length > 10) finish(false, 'reset');
+  stageIdx = i; stg = STAGES[i]; lay = layout(stg);
+  fields = stg.cubes === 2 ? [...BASE_FIELDS, ...CUBE2_FIELDS] : BASE_FIELDS;
+  roll = 0; target = new THREE.Vector3(0.3, 0.22, 0); Q = ik(target, roll);
+  gripTarget = 1; held = false; holdT = 0; t = 0; recAcc = 0; shownStars = 3;
+  mj.mj_resetData(model, data);
+  data.qpos.set(Q, 0); data.qpos[5] = data.qpos[6] = 0.04;
+  const quat = yaw => [Math.cos(yaw / 2), 0, 0, Math.sin(yaw / 2)];
+  data.qpos.set([lay.cube[0], lay.cube[1], CUBE / 2, ...quat(lay.cube[2])], ids.cubeQ);
+  data.qpos.set(lay.cube2 ? [lay.cube2[0], lay.cube2[1], CUBE / 2, ...quat(lay.cube2[2])] : [1.2, -1.5, CUBE / 2, 1, 0, 0, 0], ids.cube2Q);
+  const w = lay.wall || [0, 3, 0];
+  model.geom_pos.set([w[0], w[1], 0.06], 3 * ids.wall); model.geom_quat.set(quat(w[2]), 4 * ids.wall);
+  data.ctrl.set([...Q, 0.04, 0.04]);
+  mj.mj_forward(model, data);
+  cube2.visible = !!lay.cube2; ghost.visible = !!lay.cube2;
+  wallMesh.visible = !!lay.wall;
+  if (lay.wall) { wallMesh.position.set(w[0], 0.06, -w[1]); wallMesh.rotation.set(0, w[2], 0); }
+  zone.visible = !!lay.zone;
+  if (lay.zone) { zone.position.set(lay.zone[0], 0.003, -lay.zone[1]); zone.scale.setScalar(stg.tol + CUBE / 2); }
+  liftMark.visible = stg.id === 'lift';
+  syncView();
+  ep = { cols: Object.fromEntries(fields.map(f => [f, []])), init: { cube: lay.cube.map(v => +v.toFixed(3)), cube2: lay.cube2 && lay.cube2.map(v => +v.toFixed(3)) },
+    goal: { zone: lay.zone && lay.zone.map(v => +v.toFixed(3)), tol: stg.tol, wall: lay.wall && lay.wall.map(v => +v.toFixed(3)) }, modes: new Set([mode]) };
+  state = 'ready';
+  $('hudNo').textContent = $('rdNo').textContent = `STAGE ${i + 1}`;
+  $('hudName').textContent = $('rdName').textContent = stg.name;
+  $('hudGoal').textContent = $('rdGoal').textContent = stg.goal;
+  $('rdStars').textContent = `★★★ ${stg.stars[0]}초 안에 · ★★ ${stg.stars[1]}초 안에 · 제한 ${stg.limit}초`;
+  $('hudLimit').textContent = stg.limit; $('hudTime').textContent = '0.0';
+  $('hud').hidden = $('chips').hidden = false;
+  renderStars(3); $('holdFill').style.width = '0';
+  $('boardTitle').textContent = `최단 기록 · ${stg.name}`; renderBoard();
+  show('ovReady');
+}
+function start() { state = 'run'; show(null); startVideo(); SFX.go(); }
+function renderStars(n) {
+  [...$('hudStars').children].forEach((s, i) => s.classList.toggle('off', i >= n));
+  const nextT = n === 3 ? stg.stars[0] : n === 2 ? stg.stars[1] : null;
+  $('hudNext').textContent = nextT ? `${'★'.repeat(n)} 남은 시간 ${Math.max(0, nextT - t).toFixed(1)}초` : '시간 안에만 깨면 ★';
+}
+
+function record() {
+  const c = 3 * ids.cube, cq = 4 * ids.cube;
+  const row = [t, ...data.qpos.subarray(0, 5), opening(), ...site(ids.tcp), ...data.xpos.subarray(c, c + 3), ...data.xquat.subarray(cq, cq + 4),
+    held ? 1 : 0, mode === 'ee' ? 0 : 1, ...data.ctrl.subarray(0, 6), ...act];
+  if (stg.cubes === 2) { const c2 = 3 * ids.cube2, q2 = 4 * ids.cube2; row.push(...data.xpos.subarray(c2, c2 + 3), ...data.xquat.subarray(q2, q2 + 4)); }
+  fields.forEach((f, i) => ep.cols[f].push(Math.round(row[i] * 1000))); // stored as integers, scale 1000
+  grabFrame();
+}
+
+const REASONS = { timeout: '시간 초과', collision: '그리퍼가 바닥에 부딪혔어요', lost: '큐브가 손이 닿지 않는 곳으로 떨어졌어요', reset: '중도 포기' };
+function finish(success, reason) {
+  state = 'done';
+  const duration = Math.round(t * 100) / 100, stars = success ? starsFor(stg, duration) : 0;
+  lastWin = success;
+  if (reason !== 'reset') {
+    const prev = progress[stg.id] || 0;
+    if (stars > prev) { progress[stg.id] = stars; saveProgress(); }
+    $('rsPanel').className = `panel ${success ? 'win' : 'lose'}`;
+    $('rsTitle').textContent = success ? 'CLEAR!' : 'FAIL';
+    [...$('rsStars').children].forEach((s, i) => s.classList.toggle('on', i < stars));
+    $('rsStars').hidden = !success;
+    $('rsTime').textContent = success ? `${duration.toFixed(1)}초` : '';
+    $('rsText').innerHTML = success
+      ? (stars > prev ? '<span class="new">NEW BEST</span> ' : '') + (stars < 3 ? `★${stars + 1}개는 ${stg.stars[3 - stars - 1]}초 안에 깨면 받을 수 있어요.` : '완벽해요!')
+      : REASONS[reason];
+    $('rsNext').hidden = !success || stageIdx >= STAGES.length - 1;
+    show('ovResult');
+    if (success) { SFX.win(); for (let i = 0; i < stars; i++) SFX.star(i); confetti(); }
+    else { SFX.fail(); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) { stage.classList.remove('shake'); void stage.offsetWidth; stage.classList.add('shake'); } }
+  }
+  saveEpisode({ success, reason: success ? 'goal' : reason, duration, stars });
+}
+function confetti() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#f2b705', '#12a866', '#d2452f', '#2f7de1', '#ffffff'];
+  for (let i = 0; i < 70; i++) {
+    const c = document.createElement('i');
+    c.style.left = `${Math.random() * 100}%`; c.style.background = colors[i % colors.length];
+    c.style.animationDelay = `${Math.random() * 0.5}s`; c.style.animationDuration = `${1.4 + Math.random()}s`;
+    $('confetti').append(c); setTimeout(() => c.remove(), 3000);
+  }
+}
+
+// goal test for the current stage; also reports which cube the gripper holds
+function goalMet() {
+  const a = bpos(ids.cube), b = bpos(ids.cube2), tp = site(ids.tcp);
+  const near = p => Math.hypot(tp[0] - p[0], tp[1] - p[1], tp[2] - p[2]) < 0.05;
+  const closed = !gripTarget && opening() > 0.02;
+  held = closed && (near(a) || (stg.cubes === 2 && near(b)));
+  if (stg.id === 'lift') return held && a[2] > 0.15;
+  if (stg.tol) return !held && a[2] < 0.03 && Math.hypot(a[0] - lay.zone[0], a[1] - lay.zone[1]) < stg.tol;
+  const onTop = (u, l) => Math.hypot(u[0] - l[0], u[1] - l[1]) < 0.025 && u[2] - l[2] > 0.04 && u[2] - l[2] < 0.06;
+  return !held && (onTop(a, b) || onTop(b, a));
+}
+const lost = () => [ids.cube, ...(stg.cubes === 2 ? [ids.cube2] : [])].some(id => { const p = bpos(id); return Math.hypot(p[0], p[1]) > 0.7 || p[2] < -0.05; });
+
+// ---------- simulation step ----------
+const V = 0.22, W = 1.6, JW = 1.0;
+let wasHeld = false;
+function step(dt) {
+  const s = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 0.3 : 1;
+  act = [0, 0, 0, 0, 0, gripTarget];
+  if (state === 'run' || state === 'ready') {
+    if (mode === 'ee') {
+      const fwd = camForward(), right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+      const f = k('KeyW') - k('KeyS'), rt = k('KeyD') - k('KeyA'), up = k('KeyE') - k('KeyQ'), rr = k('KeyC') - k('KeyZ');
+      const dir = fwd.multiplyScalar(f).add(right.multiplyScalar(rt)).setY(up);
+      act = [dir.x * s, -dir.z * s, dir.y * s, rr * s, 0, gripTarget]; // MuJoCo frame
+      const nt = target.clone().addScaledVector(dir, V * s * dt);
+      nt.y = Math.max(0.03, nt.y);
+      const nr = clamp(roll + rr * W * s * dt, LIM[4][0], LIM[4][1]);
+      const q = ik(nt, nr);
+      if (q) { target = nt; roll = nr; Q = q; }
+    } else {
+      JOINT_KEYS.forEach(([p, m], i) => { const a = k(p) - k(m); act[i] = a * s; Q[i] = clamp(Q[i] + a * JW * s * dt, LIM[i][0], LIM[i][1]); });
+    }
+  }
+  const gc = gripTarget ? 0.04 : 0;
+  data.ctrl.set([...Q, gc, gc]);
+  for (let i = 0, n = Math.round(dt / model.opt.timestep); i < n; i++) mj.mj_step(model, data);
+  syncView();
+  const met = stg ? goalMet() : false;
+  if (held !== wasHeld && state === 'run') (held ? SFX.grab : SFX.drop)();
+  wasHeld = held;
+  $('hudGrip').textContent = held ? '잡음' : gripTarget ? '열림' : '닫힘';
+  $('chipGrip').classList.toggle('held', held);
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
+  zoneRing.material.opacity = met ? 1 : 0.5 + 0.4 * pulse;
+  zoneDisc.material.opacity = met ? 0.45 : 0.15 + 0.1 * pulse;
+
+  if (state !== 'run') return;
+  t += dt; recAcc += dt;
+  if (recAcc >= 1 / HZ) { recAcc -= 1 / HZ; record(); }
+  holdT = met ? holdT + dt : 0;
+  $('holdFill').style.width = `${Math.min(1, holdT / HOLD_T) * 100}%`;
+  $('hudTime').textContent = t.toFixed(1);
+  const n = starsFor(stg, t);
+  if (n < shownStars) { shownStars = n; SFX.lose(); }
+  renderStars(n);
+  const tipZ = Math.min(site(ids.tipL)[2], site(ids.tipR)[2]);
+  if (holdT >= HOLD_T) finish(true);
+  else if (tipZ < 0.001) finish(false, 'collision');
+  else if (lost()) finish(false, 'lost');
+  else if (t >= stg.limit) finish(false, 'timeout');
+}
+let last = performance.now();
+function loop(now) {
+  step(Math.min(0.05, (now - last) / 1000)); last = now;
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ---------- dataset storage ----------
+let db = null, user = null, me = null, downloads = null, assets = null, runs = [];
+const taskOf = r => r.task === 'pick-cube' ? 'lift' : r.task;
+async function saveEpisode(sum) {
+  const video = stopVideo(), e = ep, s = stg, f = fields; // capture now: the next stage can start while this one saves
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const modes = [...e.modes];
+  const run = { id, player: me, task: s.id, stage: STAGES.indexOf(s) + 1, modes, ...sum, steps: e.cols.t.length, created: Date.now(), v: 4 };
+  if (!db || !me) { runs.unshift(run); renderBoard(); return; }
+  try {
+    // trajectory first, so a slow or refused video upload can never lose it
+    await db.collection('episodes').doc(id).set({ id, player: me, task: s.id, stage: run.stage, modes, ...sum, hz: HZ, frame: 'mujoco-z-up', sim: 'mujoco-4.0.1',
+      scale: 1000, fields: f, cols: e.cols, init: e.init, goal: e.goal, cam: null, created: run.created, v: 4 });
+    await db.collection('runs').doc(id).set({ ...run, video: false });
+    $('saveStatus').textContent = `에피소드 저장됨 · ${run.steps} 스텝`;
+  } catch (err) {
+    $('saveStatus').textContent = err && err.code === 'quota_exceeded' ? '저장 공간이 가득 찼습니다. 관리자에게 알려 주세요.' : '이번 판은 저장하지 못했습니다. 보기 전용 권한이면 기록이 남지 않습니다.';
+    return;
+  }
+  const blob = await video;
+  if (!blob || !blob.size) { $('saveStatus').textContent += ' · 이 브라우저는 영상을 녹화하지 못했습니다'; return; }
+  if (!assets) { $('saveStatus').textContent += ' · 영상 업로드 권한 없음'; return; }
+  try {
+    $('saveStatus').textContent = '손목 카메라 영상 올리는 중…';
+    const up = await assets.upload(blob, { type: blob.type });
+    const cam = { asset: up.id, type: up.contentType, bytes: up.sizeBytes, size: CAM, fps: HZ, frames: e.cols.t.length, view: 'wrist' };
+    await db.collection('episodes').doc(id).update({ cam });
+    await db.collection('runs').doc(id).update({ video: true });
+    $('saveStatus').textContent = `에피소드 저장됨 · ${run.steps} 스텝 · 영상 포함`;
+  } catch (err) {
+    console.warn('video upload failed', err);
+    $('saveStatus').textContent = `에피소드 저장됨 · 영상은 올리지 못했습니다 (${(err && err.code) || '알 수 없는 오류'})`;
+  }
+}
+
+async function renderBoard() {
+  if (!stg) return;
+  const best = new Map();
+  for (const r of runs) if (r.success && taskOf(r) === stg.id && (!best.has(r.player) || r.duration < best.get(r.player).duration)) best.set(r.player, r);
+  const top = [...best.values()].sort((a, b) => a.duration - b.duration).slice(0, 8);
+  const profiles = user && top.length ? await user.profiles(top.map(r => r.player).filter(Boolean)) : {};
+  $('board').innerHTML = '';
+  top.forEach((r, i) => {
+    const li = document.createElement('li');
+    if (r.player && r.player === me) li.className = 'me';
+    const name = (profiles[r.player] && profiles[r.player].name) || (r.player === me ? '나' : '플레이어');
+    li.innerHTML = `<span class="n">${i + 1}</span><span class="who"></span><span class="s">${'★'.repeat(r.stars || starsFor(stg, r.duration))}</span><span class="t">${r.duration.toFixed(1)}s</span>`;
+    li.querySelector('.who').textContent = name;
+    $('board').append(li);
+  });
+  $('boardEmpty').hidden = top.length > 0;
+  const done = runs.filter(r => r.reason !== 'reset');
+  $('stTotal').textContent = runs.length;
+  $('stRate').textContent = done.length ? `${Math.round(done.filter(r => r.success).length / done.length * 100)}%` : '–';
+  $('stMine').textContent = runs.filter(r => r.player === me).length;
+}
+
+async function connect() {
+  const Cl = window.claude;
+  if (!Cl || !Cl.use) { $('saveStatus').textContent = '미리보기 모드: 기록이 이 화면에만 남습니다.'; return; }
+  [db, user, downloads, assets] = await Promise.all([Cl.use('db'), Cl.use('user'), Cl.use('downloads'), Cl.use('assets')]);
+  me = user ? await user.id() : null;
+  if (!db || !me) { $('saveStatus').textContent = '로그인하면 플레이 기록이 데이터셋에 저장됩니다.'; return; }
+  $('saveStatus').textContent = '플레이할 때마다 에피소드와 손목 카메라 영상이 저장됩니다.';
+  // ponytail: board reads the latest 500 runs only; add a summary doc if the dataset outgrows it
+  db.collection('runs').orderBy('created', 'desc').limit(500).onSnapshot(
+    snap => { runs = snap.docs.map(d => d.data()); renderBoard(); },
+    () => { $('saveStatus').textContent = '기록판을 불러오지 못했습니다. 플레이는 계속 저장됩니다.'; });
+  if (downloads && await user.isOwner()) $('btnExport').hidden = false;
+}
+$('btnExport').onclick = async () => {
+  const btn = $('btnExport'); btn.disabled = true; btn.textContent = '불러오는 중…';
+  try {
+    const snap = await db.collection('episodes').orderBy('created', 'asc').limit(1000).get();
+    await downloads.save({ filename: `pick-lab-episodes-${snap.size}.jsonl`, data: snap.docs.map(d => JSON.stringify(d.data())).join('\n') });
+  } catch { /* viewer declined or store unavailable */ }
+  btn.disabled = false; btn.textContent = '에피소드 저장 (JSONL)';
+};
+
+if (location.hostname === 'localhost') window.__lab = { get state() { return state; }, get stg() { return stg; }, get lay() { return lay; }, get data() { return data; }, ids, loadStage, finish, goalMet, setTarget: p => { target = p; }, setGrip: g => { gripTarget = g; }, start, ik, camPx, startVideo, stopVideo, grabFrame };
+
+// ---------- boot ----------
+renderMode();
+placeCamera(); resize();
+render();
+connect();
+try {
+  await loadPhysics();
+  if (window.__lab) window.__lab.ids = ids;
+  roll = 0; target = new THREE.Vector3(0.3, 0.22, 0); Q = ik(target, roll);
+  data.qpos.set(Q, 0); data.ctrl.set([...Q, 0.04, 0.04]); data.qpos[5] = data.qpos[6] = 0.04;
+  mj.mj_forward(model, data); syncView();
+  openMenu();
+  last = performance.now();
+  requestAnimationFrame(loop);
+} catch (e) {
+  console.error(e);
+  $('ovLoading').querySelector('h2').textContent = '물리 엔진을 불러오지 못했습니다';
+  $('ovLoading').querySelector('p').textContent = '새로고침해 보세요. 계속 실패하면 브라우저가 WebAssembly를 막고 있을 수 있습니다.';
+}
+</script>
